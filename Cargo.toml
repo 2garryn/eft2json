@@ -1,0 +1,7 @@
+[package]
+name = "eterm2json"
+version = "0.1.0"
+authors = ["Artem Golovinsky <artemgolovinsky@gmail.com>"]
+edition = "2018"
+
+[dependencies]

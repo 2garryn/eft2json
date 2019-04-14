@@ -1,0 +1,16 @@
+
+
+integer: {t: "n", v: "123"}
+atom: {t: "a", v: "atom_name"}
+binary: ?
+reference: ?
+port identifier: ?
+Pid ? 
+tuple: {t: "t", v: {
+    '1': {t: "i", v: "455"},
+    '2': {t: "a", v: "test"},
+}}
+map: ?
+list: {t: "l", v: []}
+boolean: {t: "b", v: true}
+undefined: {t: "undefined}
