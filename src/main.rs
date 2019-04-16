@@ -2,6 +2,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::fmt;
+use std::str;
 
 
 
@@ -13,6 +14,7 @@ enum ErrorCode {
     NotImplemented = 2,
     InvalidListTerm = 3,
     NotErlangBinary = 4,
+    NotUtf8Atom = 5,
 }
 
 
@@ -33,6 +35,12 @@ impl ParseError {
 impl From<std::io::Error> for ParseError {
     fn from(_err: std::io::Error) -> Self {
         ParseError::new(ErrorCode::ReadError)
+    }
+}
+
+impl From<std::str::Utf8Error> for ParseError {
+    fn from(_err: std::str::Utf8Error) -> Self {
+        ParseError::new(ErrorCode::NotUtf8Atom)
     }
 }
 
@@ -93,6 +101,9 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         105 => large_tuple_ext(data_stream, make_str, result),
         109 => binary_ext(data_stream, make_str, result),
         99 => float_ext(data_stream, make_str, result),
+        //77 => bit_binary_ext(data_stream, make_str, result),
+        119 => small_atom_utf8_ext(data_stream, make_str, result),
+        118 => atom_utf8_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
@@ -236,10 +247,49 @@ fn binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -
     make_str.make_str_term("b", &s, result);
     Ok(())
 }
+fn small_atom_utf8_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let len = read_u8(data_stream)?;
+    let mut v: Vec<u8> = vec![];
+    for _ in 0..len {
+        let mut one_b: [u8; 1] = [0];
+        data_stream.read_exact(&mut one_b)?;
+        v.push(one_b[0]);
+    };
+    let s = [
+        "\"".to_string(),
+        str::from_utf8(&v)?.to_string(),
+        "\"".to_string(),
+    ].concat();
+    make_str.make_str_term("a", &s, result);
+    Ok(())
+}
+fn atom_utf8_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let len = read_u16(data_stream)?;
+    let mut v: Vec<u8> = vec![];
+    for _ in 0..len {
+        let mut one_b: [u8; 1] = [0];
+        data_stream.read_exact(&mut one_b)?;
+        v.push(one_b[0]);
+    };
+    let s = [
+        "\"".to_string(),
+        str::from_utf8(&v)?.to_string(),
+        "\"".to_string(),
+    ].concat();
+    make_str.make_str_term("a", &s, result);
+    Ok(())
+}
 
+
+/*
+fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let len = read_u32(data_stream)?;
+  
+}
+*/
 
 fn main() {
-    let mut f = open_file(&"bb.bin".to_string());
+    let mut f = open_file(&"utf.bin".to_string());
     match start_parsing(&mut f) {
         Ok(json) => println!("{}", json),
         Err(error) => println!("Error: {}", error),
