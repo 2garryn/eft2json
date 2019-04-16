@@ -104,6 +104,9 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         //77 => bit_binary_ext(data_stream, make_str, result),
         119 => small_atom_utf8_ext(data_stream, make_str, result),
         118 => atom_utf8_ext(data_stream, make_str, result),
+        101 => reference_ext(data_stream, make_str, result),
+        102 => port_ext(data_stream, make_str, result),
+        82 => atom_cache_ref(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
@@ -280,6 +283,37 @@ fn atom_utf8_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
     Ok(())
 }
 
+fn reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let mut node: String = String::new();
+    parse(data_stream, make_str, &mut node)?;
+    let res: String = format!(
+        "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
+        node, 
+        read_u32(data_stream)?, 
+        read_u8(data_stream)?
+    );
+    make_str.make_str_term("ref", &res, result);
+    Ok(())
+}
+
+fn port_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let mut node: String = String::new();
+    parse(data_stream, make_str, &mut node)?;
+    let res: String = format!(
+        "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
+        node, 
+        read_u32(data_stream)?, 
+        read_u8(data_stream)?
+    );
+    make_str.make_str_term("port", &res, result);
+    Ok(())
+}
+
+fn atom_cache_ref(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let acr = read_u8(data_stream)?;
+    make_str.make_str_term("acr", &acr.to_string(), result);
+    Ok(())
+}
 
 /*
 fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
