@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::Read;
-use std::error::Error;
 use std::fmt;
 
 type ParseResult = Result<(), ParseError>;
@@ -15,21 +14,21 @@ enum ErrorCode {
 
 
 struct ParseError {
-    errorCode: ErrorCode
+    error_code: ErrorCode
 }
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,"{:?}", self.errorCode)
+        write!(f,"{:?}", self.error_code)
     }
 }
 impl ParseError {
     fn new(err_code: ErrorCode) -> ParseError {
-        ParseError{errorCode: err_code}
+        ParseError{error_code: err_code}
     }
 }
 
 impl From<std::io::Error> for ParseError {
-    fn from(err: std::io::Error) -> Self {
+    fn from(_err: std::io::Error) -> Self {
         ParseError::new(ErrorCode::ReadError)
     }
 }
@@ -37,13 +36,13 @@ impl From<std::io::Error> for ParseError {
 
 
 trait MakeStr {
-    fn make_str_term(&self, etype: String, evalue: &String, result: &mut String);
+    fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String);
 }
 
 struct DefaultMakeStr;
 
 impl MakeStr for DefaultMakeStr {
-    fn make_str_term(&self, etype: String, evalue: &String, result: &mut String) {
+    fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String) {
         //    println!("Blah {} {} {}", etype, evalue, result);
         result.push_str("{\"t\":\"");
         result.push_str(&etype);
@@ -83,7 +82,7 @@ fn elist_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
     let mut nil_ext: [u8; 1] = [0];
     data_stream.read_exact(&mut nil_ext)?;
     if nil_ext[0] == 106 {
-        make_str.make_str_term("l".to_string(), &list_str, result);
+        make_str.make_str_term("l", &list_str, result);
         Ok(())
     } else {
         Err(ParseError::new(ErrorCode::InvalidListTerm))
@@ -100,7 +99,7 @@ fn einteger_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
         i32::from_be_bytes(v_int_arr).to_string(),
         "\"".to_string(),
     ].concat();
-    make_str.make_str_term("i".to_string(), &s, result);
+    make_str.make_str_term("i", &s, result);
     Ok(())
 }
 
@@ -108,7 +107,7 @@ fn esmall_integer_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut
     let mut v_int_arr: [u8; 1] = [0];
     data_stream.read_exact(&mut v_int_arr)?;
     let s = ["\"".to_string(), v_int_arr[0].to_string(), "\"".to_string()].concat();
-    make_str.make_str_term("i".to_string(), &s, result);
+    make_str.make_str_term("i", &s, result);
     Ok(())
 }
 
@@ -127,7 +126,7 @@ fn estrext_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
         }
     };
     str_term.push_str("]");
-    make_str.make_str_term("str".to_string(), &str_term, result);
+    make_str.make_str_term("str", &str_term, result);
     Ok(())
 }
 fn eatom_ext_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
@@ -142,7 +141,7 @@ fn eatom_ext_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut Stri
         atom_term.push(ch[0] as char);
     };
     atom_term.push_str("\"");
-    make_str.make_str_term("a".to_string(), &atom_term, result);
+    make_str.make_str_term("a", &atom_term, result);
     Ok(())
 }
 
@@ -163,7 +162,7 @@ fn small_tuple_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Stri
         }
     };
     tuple_str.push_str("}");
-    make_str.make_str_term("t".to_string(), &tuple_str, result);
+    make_str.make_str_term("t", &tuple_str, result);
     Ok(()) 
 }
 
