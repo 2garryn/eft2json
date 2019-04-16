@@ -1,6 +1,9 @@
+
 use std::fs::File;
 use std::io::Read;
 use std::fmt;
+
+
 
 type ParseResult = Result<(), ParseError>;
 
@@ -52,6 +55,30 @@ impl MakeStr for DefaultMakeStr {
     }
 }
 
+fn read_u8(data_stream: &mut Read) -> Result<u8, ParseError> {
+    let mut len: [u8; 1] = [0];
+    data_stream.read_exact(&mut len)?;
+    Ok(u8::from_be_bytes(len))
+}
+
+fn read_u16(data_stream: &mut Read) -> Result<u16, ParseError> {
+    let mut len: [u8; 2] = [0; 2];
+    data_stream.read_exact(&mut len)?;
+    Ok(u16::from_be_bytes(len))
+}
+
+fn read_u32(data_stream: &mut Read) -> Result<u32, ParseError> {
+    let mut len: [u8; 4] = [0; 4];
+    data_stream.read_exact(&mut len)?;
+    Ok(u32::from_be_bytes(len))
+}
+
+fn read_i32(data_stream: &mut Read) -> Result<i32, ParseError> {
+    let mut val: [u8; 4] = [0; 4];
+    data_stream.read_exact(&mut val)?;
+    Ok(i32::from_be_bytes(val))
+}
+
 fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut el_type: [u8; 1] = [0];
     data_stream.read_exact(&mut el_type)?;
@@ -61,16 +88,18 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         98 => einteger_parse(data_stream, make_str, result),
         97 => esmall_integer_parse(data_stream, make_str, result),
         100 => eatom_ext_parse(data_stream, make_str, result),
+        115 => small_atom_ext(data_stream, make_str, result),
         104 => small_tuple_ext(data_stream, make_str, result),
+        105 => large_tuple_ext(data_stream, make_str, result),
+        109 => binary_ext(data_stream, make_str, result),
+        99 => float_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
 
 fn elist_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut l_len: [u8; 4] = [0, 0, 0, 0];
+    let l = read_u32(data_stream)?;
     let mut list_str: String = String::new();
-    data_stream.read_exact(&mut l_len)?;
-    let l = u32::from_be_bytes(l_len);
     list_str.push_str("[");
     for n in 0..l {
         parse(data_stream, make_str, &mut list_str)?;
@@ -79,9 +108,7 @@ fn elist_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
         }
     };
     list_str.push_str("]");
-    let mut nil_ext: [u8; 1] = [0];
-    data_stream.read_exact(&mut nil_ext)?;
-    if nil_ext[0] == 106 {
+    if read_u8(data_stream)? == 106 {
         make_str.make_str_term("l", &list_str, result);
         Ok(())
     } else {
@@ -92,11 +119,9 @@ fn elist_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
 
 
 fn einteger_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut v_int_arr: [u8; 4] = [0, 0, 0, 0];
-    data_stream.read_exact(&mut v_int_arr)?;
     let s = [
         "\"".to_string(),
-        i32::from_be_bytes(v_int_arr).to_string(),
+        read_i32(data_stream)?.to_string(),
         "\"".to_string(),
     ].concat();
     make_str.make_str_term("i", &s, result);
@@ -104,23 +129,17 @@ fn einteger_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
 }
 
 fn esmall_integer_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut v_int_arr: [u8; 1] = [0];
-    data_stream.read_exact(&mut v_int_arr)?;
-    let s = ["\"".to_string(), v_int_arr[0].to_string(), "\"".to_string()].concat();
+    let s = ["\"".to_string(), read_u8(data_stream)?.to_string(), "\"".to_string()].concat();
     make_str.make_str_term("i", &s, result);
     Ok(())
 }
 
 fn estrext_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut l_len: [u8; 2] = [0, 0];
-    data_stream.read_exact(&mut l_len)?;
-    let l = u16::from_be_bytes(l_len);
+    let l = read_u16(data_stream)?;
     let mut str_term: String = String::new();
     str_term.push_str("[");
     for n in 0..l {
-        let mut ch: [u8; 1] = [0];
-        data_stream.read_exact(&mut ch)?;
-        str_term.push_str(&ch[0].to_string());
+        str_term.push_str(&(read_u8(data_stream)?).to_string());
         if n + 1 < l {
             str_term.push_str(",");
         }
@@ -130,31 +149,37 @@ fn estrext_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
     Ok(())
 }
 fn eatom_ext_parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut len: [u8; 2] = [0, 0];
-    data_stream.read_exact(&mut len)?;
-    let l = u16::from_be_bytes(len);
+    let l = read_u16(data_stream)?;
     let mut atom_term: String = String::new();
     atom_term.push_str("\"");
     for _ in 0..l {
-        let mut ch: [u8; 1] = [0];
-        data_stream.read_exact(&mut ch)?;
-        atom_term.push(ch[0] as char);
+        atom_term.push(read_u8(data_stream)? as char);
+    };
+    atom_term.push_str("\"");
+    make_str.make_str_term("a", &atom_term, result);
+    Ok(())
+}
+fn small_atom_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let l = read_u8(data_stream)?;
+    let mut atom_term: String = String::new();
+    atom_term.push_str("\"");
+    for _ in 0..l {
+        atom_term.push(read_u8(data_stream)? as char);
     };
     atom_term.push_str("\"");
     make_str.make_str_term("a", &atom_term, result);
     Ok(())
 }
 
+
+
 fn small_tuple_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut arity: [u8; 1] = [0];
-    data_stream.read_exact(&mut arity)?;
-    
-    let l = u8::from_be_bytes(arity);
+    let l = read_u8(data_stream)?;
     let mut tuple_str: String = String::new();
     tuple_str.push_str("{");
     for n in 0..l {
         tuple_str.push_str("\"");
-        tuple_str.push_str(&u8::from_be_bytes([n + 1]).to_string());
+        tuple_str.push_str(&(n + 1).to_string());
         tuple_str.push_str("\":");
         parse(data_stream, make_str, &mut tuple_str)?;
         if n + 1 < l {
@@ -166,8 +191,55 @@ fn small_tuple_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Stri
     Ok(()) 
 }
 
+fn large_tuple_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let l = read_u32(data_stream)?;
+    let mut tuple_str: String = String::new();
+    tuple_str.push_str("{");
+    for n in 0..l {
+        tuple_str.push_str("\"");
+        tuple_str.push_str(&(n + 1).to_string());
+        tuple_str.push_str("\":");
+        parse(data_stream, make_str, &mut tuple_str)?;
+        if n + 1 < l {
+            tuple_str.push_str(",");
+        }
+    };
+    tuple_str.push_str("}");
+    make_str.make_str_term("t", &tuple_str, result);
+    Ok(()) 
+}
+
+fn float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let mut float_arr: [u8; 31] = [0; 31];
+    data_stream.read_exact(&mut float_arr)?;
+    let mut res = String::new();
+    for n in 0..31 {
+        res.push(float_arr[n] as char);
+    }
+    make_str.make_str_term("f", &res, result);
+    Ok(())
+}
+
+fn binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let len = read_u32(data_stream)?;
+    let mut v: Vec<u8> = vec![];
+    for _ in 0..len {
+        let mut one_b: [u8; 1] = [0];
+        data_stream.read_exact(&mut one_b)?;
+        v.push(one_b[0]);
+    };
+    let s = [
+        "\"".to_string(),
+        base64::encode(&v),
+        "\"".to_string(),
+    ].concat();
+    make_str.make_str_term("b", &s, result);
+    Ok(())
+}
+
+
 fn main() {
-    let mut f = open_file(&"kk.bin".to_string());
+    let mut f = open_file(&"bb.bin".to_string());
     match start_parsing(&mut f) {
         Ok(json) => println!("{}", json),
         Err(error) => println!("Error: {}", error),

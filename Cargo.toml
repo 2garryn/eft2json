@@ -5,3 +5,4 @@ authors = ["Artem Golovinsky <artemgolovinsky@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+base64 = "0.10.1"
