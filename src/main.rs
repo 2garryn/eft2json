@@ -108,6 +108,7 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         102 => port_ext(data_stream, make_str, result),
         82 => atom_cache_ref(data_stream, make_str, result),
         103 => pid_ext(data_stream, make_str, result),
+        116 => map_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
@@ -329,6 +330,25 @@ fn atom_cache_ref(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
     Ok(())
 }
 
+fn map_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let arity = read_u32(data_stream)?;
+    let mut map_str: String = String::new();
+    map_str.push_str("[");
+    for n in 0..arity {
+        map_str.push_str("{\"key\":");
+        parse(data_stream, make_str, &mut map_str)?;
+        map_str.push_str(",\"val\":");
+        parse(data_stream, make_str, &mut map_str)?;
+        map_str.push_str("}");
+        if n + 1 < arity {
+            map_str.push_str(",");
+        }
+    };
+    map_str.push_str("]");
+    make_str.make_str_term("m", &map_str.to_string(), result);
+    Ok(())
+}
+
 /*
 fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let len = read_u32(data_stream)?;
@@ -337,7 +357,7 @@ fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
 */
 
 fn main() {
-    let mut f = open_file(&"ee.bin".to_string());
+    let mut f = open_file(&"map.bin".to_string());
     match start_parsing(&mut f) {
         Ok(json) => println!("{}", json),
         Err(error) => println!("Error: {}", error),
