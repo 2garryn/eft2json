@@ -5,7 +5,7 @@
 + FLOAT_EXT - 'f'
 + REFERENCE_EXT - 'ref'
 + PORT_EXT - 'port'
-PID_EXT
++ PID_EXT - 'pid'
 + SMALL_TUPLE_EXT - 't'
 + LARGE_TUPLE_EXT - 't'
 MAP_EXT
