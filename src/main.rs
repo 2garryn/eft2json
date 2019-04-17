@@ -109,6 +109,8 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         82 => atom_cache_ref(data_stream, make_str, result),
         103 => pid_ext(data_stream, make_str, result),
         116 => map_ext(data_stream, make_str, result),
+        117 => fun_ext(data_stream, make_str, result),
+       // 112 => new_fun_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
@@ -349,15 +351,37 @@ fn map_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> P
     Ok(())
 }
 
-/*
-fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let len = read_u32(data_stream)?;
-  
+
+fn fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let num_free = read_u32(data_stream)?;
+    let mut pid = String::new();
+    parse(data_stream, make_str, &mut pid)?;
+    let mut module = String::new();
+    parse(data_stream, make_str, &mut module)?;
+    let mut index = String::new();
+    parse(data_stream, make_str, &mut index)?;
+    let mut uniq = String::new();
+    parse(data_stream, make_str, &mut uniq)?;
+    let mut free_vars = String::new();
+    free_vars.push_str("[");
+    for n in 0..num_free {
+        parse(data_stream, make_str, &mut free_vars)?;
+        if n + 1 < num_free {
+            free_vars.push_str(",");
+        }
+    };
+    free_vars.push_str("]");
+
+    let res: String = format!(
+        "{{\"pid\":{},\"mod\":{},\"index\":{},\"uniq\":{},\"vars\":{}}}", 
+        pid, module,  index, uniq, free_vars
+    );
+    make_str.make_str_term("fun", &res.to_string(), result);
+    Ok(())
 }
-*/
 
 fn main() {
-    let mut f = open_file(&"map.bin".to_string());
+    let mut f = open_file(&"fun.bin".to_string());
     match start_parsing(&mut f) {
         Ok(json) => println!("{}", json),
         Err(error) => println!("Error: {}", error),
