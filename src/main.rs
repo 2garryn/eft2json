@@ -1,8 +1,8 @@
 
-use std::fs::File;
 use std::io::Read;
 use std::fmt;
 use std::str;
+use std::io;
 
 
 
@@ -110,6 +110,7 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         103 => pid_ext(data_stream, make_str, result),
         116 => map_ext(data_stream, make_str, result),
         117 => fun_ext(data_stream, make_str, result),
+        110 => small_big_ext(data_stream, make_str, result),
        // 112 => new_fun_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
@@ -380,8 +381,29 @@ fn fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> P
     Ok(())
 }
 
+fn small_big_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let n = read_u8(data_stream)?;
+    let neg: bool = read_u8(data_stream)? > 0;
+    let mut bytes = String::new();
+    bytes.push_str("[");
+    for i in 0..n {
+        bytes.push_str(&read_u8(data_stream)?.to_string());
+        if i + 1 < n {
+            bytes.push_str(",");
+        }
+    };
+    bytes.push_str("]");
+    let res: String = format!(
+        "{{\"neg\":{},\"b\":256,\"d\":{}}}", 
+        neg, bytes
+    );
+    make_str.make_str_term("bi", &res.to_string(), result);
+    Ok(())
+}
+
+
 fn main() {
-    let mut f = open_file(&"fun.bin".to_string());
+    let mut f = io::stdin();
     match start_parsing(&mut f) {
         Ok(json) => println!("{}", json),
         Err(error) => println!("Error: {}", error),
@@ -400,12 +422,4 @@ fn start_parsing(f: &mut Read) -> Result<String, ParseError> {
         Err(ParseError::new(ErrorCode::NotErlangBinary))
     }
 }
-
-fn open_file(name: &String) -> File {
-    match File::open(name) {
-        Err(_) => panic!("couldn't open"),
-        Ok(file) => file,
-    }
-}
-
 

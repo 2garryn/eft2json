@@ -13,7 +13,7 @@
 + STRING_EXT - 'str'
 + LIST_EXT - 'l'
 + BINARY_EXT - 'b' - binary encoded as base64
-SMALL_BIG_EXT
++ SMALL_BIG_EXT
 LARGE_BIG_EXT
 NEW_REFERENCE_EXT
 FUN_EXT - 'fun'
