@@ -14,9 +14,9 @@
 + LIST_EXT - 'l'
 + BINARY_EXT - 'b' - binary encoded as base64
 + SMALL_BIG_EXT
-LARGE_BIG_EXT
++ LARGE_BIG_EXT
 NEW_REFERENCE_EXT
-FUN_EXT - 'fun'
++ FUN_EXT - 'fun'
 NEW_FUN_EXT
 EXPORT_EXT
 BIT_BINARY_EXT

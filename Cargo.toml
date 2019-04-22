@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 base64 = "0.10.1"
+num-bigint = "0.2"
