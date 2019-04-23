@@ -56,7 +56,6 @@ struct DefaultMakeStr;
 
 impl MakeStr for DefaultMakeStr {
     fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String) {
-        //    println!("Blah {} {} {}", etype, evalue, result);
         result.push_str("{\"t\":\"");
         result.push_str(&etype);
         result.push_str("\",\"v\":");
@@ -95,26 +94,27 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
     match el_type[0] {
         108 => list_ext(data_stream, make_str, result),
         107 => string_ext(data_stream, make_str, result),
-        98 => integer_ext(data_stream, make_str, result),
-        97 => small_integer_ext(data_stream, make_str, result),
+        98  => integer_ext(data_stream, make_str, result),
+        97  => small_integer_ext(data_stream, make_str, result),
         100 => atom_ext(data_stream, make_str, result),
         115 => small_atom_ext(data_stream, make_str, result),
         104 => small_tuple_ext(data_stream, make_str, result),
         105 => large_tuple_ext(data_stream, make_str, result),
         109 => binary_ext(data_stream, make_str, result),
-        99 => float_ext(data_stream, make_str, result),
-        //77 => bit_binary_ext(data_stream, make_str, result),
+        99  => float_ext(data_stream, make_str, result),
         119 => small_atom_utf8_ext(data_stream, make_str, result),
         118 => atom_utf8_ext(data_stream, make_str, result),
         101 => reference_ext(data_stream, make_str, result),
         102 => port_ext(data_stream, make_str, result),
-        82 => atom_cache_ref(data_stream, make_str, result),
+        82  => atom_cache_ref(data_stream, make_str, result),
         103 => pid_ext(data_stream, make_str, result),
         116 => map_ext(data_stream, make_str, result),
         117 => fun_ext(data_stream, make_str, result),
         110 => small_big_ext(data_stream, make_str, result),
         111 => large_big_ext(data_stream, make_str, result),
-       // 112 => new_fun_ext(data_stream, make_str, result),
+        114 => new_reference_ext(data_stream, make_str, result),
+        113 => export_ext(data_stream, make_str, result),
+        77  => bit_binary_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
@@ -348,6 +348,48 @@ fn big(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
     make_str.make_str_term("bi", &r.to_string(), result);
     Ok(())
 }
+
+fn new_reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let _len = read_u16(data_stream)?;
+    let mut node: String = String::new();
+    parse(data_stream, make_str, &mut node)?;
+    let creation = read_u8(data_stream)?;
+    let res: String = format!(
+        "{{\"node\":{},\"creation\":{}}}", 
+        node, 
+        creation
+    );
+    make_str.make_str_term("nref", &res, result);
+    Ok(())
+}
+
+fn export_ext(_data_stream: &mut Read, _make_str: &MakeStr, _result: &mut String) -> ParseResult {
+    Ok(())
+}
+
+fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let len = read_u32(data_stream)?;
+    let bits = read_u8(data_stream)?;
+    let mut v: Vec<u8> = vec![];
+    for _ in 0..len {
+        let mut one_b: [u8; 1] = [0];
+        data_stream.read_exact(&mut one_b)?;
+        v.push(one_b[0]);
+    };
+    let s = [
+        "\"".to_string(),
+        base64::encode(&v),
+        "\"".to_string(),
+    ].concat();
+    let res: String = format!(
+        "{{\"bits\":{},\"data\":{}}}", 
+        bits, 
+        s
+    );
+    make_str.make_str_term("bs", &res, result);
+    Ok(())
+}
+
 
 
 fn create_list<F>(n: u32, result: &mut String, lf: &mut F) -> ParseResult 
