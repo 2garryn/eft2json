@@ -64,6 +64,14 @@ impl MakeStr for DefaultMakeStr {
     }
 }
 
+struct ReturnValueMakeStr;
+
+impl MakeStr for ReturnValueMakeStr {
+    fn make_str_term(&self, _etype: &str, evalue: &String, result: &mut String) {
+        result.push_str(evalue);
+    }
+} 
+
 fn read_u8(data_stream: &mut Read) -> Result<u8, ParseError> {
     let mut len: [u8; 1] = [0];
     data_stream.read_exact(&mut len)?;
@@ -89,9 +97,8 @@ fn read_i32(data_stream: &mut Read) -> Result<i32, ParseError> {
 }
 
 fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mut el_type: [u8; 1] = [0];
-    data_stream.read_exact(&mut el_type)?;
-    match el_type[0] {
+    let term_type = read_u8(data_stream)?;
+    match term_type {
         108 => list_ext(data_stream, make_str, result),
         107 => string_ext(data_stream, make_str, result),
         98  => integer_ext(data_stream, make_str, result),
@@ -363,9 +370,6 @@ fn new_reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut St
     Ok(())
 }
 
-fn export_ext(_data_stream: &mut Read, _make_str: &MakeStr, _result: &mut String) -> ParseResult {
-    Ok(())
-}
 
 fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let len = read_u32(data_stream)?;
@@ -387,6 +391,39 @@ fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
         s
     );
     make_str.make_str_term("bs", &res, result);
+    Ok(())
+}
+
+fn export_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let mstr: &MakeStr = &ReturnValueMakeStr {};
+    let mut parse_atoms = |r: &mut String| -> ParseResult {
+        let term_type = read_u8(data_stream)?;
+        match term_type {
+            119 => small_atom_utf8_ext(data_stream, mstr, r),
+            118 => atom_utf8_ext(data_stream, mstr, r),
+            82  => atom_cache_ref(data_stream, mstr, r),
+            100 => atom_ext(data_stream, mstr, r),
+            115 => small_atom_ext(data_stream, mstr, r),
+            _ => Err(ParseError::new(ErrorCode::NotErlangBinary)),
+        }
+    };
+    let mut module = String::new();
+    parse_atoms( &mut module)?;
+    let mut func = String::new();
+    parse_atoms(&mut func)?;
+    let mut arity = String::new();
+
+    match read_u8(data_stream)? {
+        97 => small_integer_ext(data_stream, mstr, &mut arity)?,
+        _ => return Err(ParseError::new(ErrorCode::NotErlangBinary)),
+    };
+    let res: String = format!(
+        "{{\"m\":{},\"f\":{},\"a\":{}}}", 
+        module, 
+        func,
+        arity
+    );
+    make_str.make_str_term("efun", &res, result);
     Ok(())
 }
 
