@@ -6,7 +6,7 @@ use std::io;
 use num_bigint::Sign;
 use num_bigint::BigInt;
 use byteorder::{ByteOrder, BigEndian};
-
+extern crate hex;
 
 
 type ParseResult = Result<(), ParseError>;
@@ -20,6 +20,32 @@ enum ErrorCode {
     NotUtf8Atom = 5,
 }
 
+const ATOM_CACHE_REF: u8 = 82;
+const SMALL_INTEGER_EXT: u8 = 97;
+const INTEGER_EXT: u8 = 98;
+const FLOAT_EXT: u8 = 99;
+const REFERENCE_EXT: u8 = 101;
+const PORT_EXT: u8 = 102;
+const PID_EXT: u8 = 103;
+const SMALL_TUPLE_EXT: u8 = 104;
+const LARGE_TUPLE_EXT: u8 = 105;
+const MAP_EXT: u8 = 116;
+const NIL_EXT: u8 = 106;
+const STRING_EXT: u8 = 107;
+const LIST_EXT: u8 = 108;
+const BINARY_EXT: u8 = 109;
+const SMALL_BIG_EXT: u8 = 110;
+const LARGE_BIG_EXT: u8 = 111;
+const NEW_REFERENCE_EXT: u8 = 114;
+const FUN_EXT: u8 = 117;
+const NEW_FUN_EXT: u8 = 112;
+const EXPORT_EXT: u8 = 113;
+const BIT_BINARY_EXT: u8 = 77;
+const NEW_FLOAT_EXT: u8 = 70;
+const ATOM_UTF8_EXT: u8 = 118;
+const SMALL_ATOM_UTF8_EXT: u8 = 119;
+const ATOM_EXT: u8 = 100;
+const SMALL_ATOM_EXT: u8 = 115;
 
 struct ParseError {
     error_code: ErrorCode
@@ -54,7 +80,6 @@ trait MakeStr {
 }
 
 struct DefaultMakeStr;
-
 impl MakeStr for DefaultMakeStr {
     fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String) {
         result.push_str("{\"t\":\"");
@@ -66,12 +91,16 @@ impl MakeStr for DefaultMakeStr {
 }
 
 struct ReturnValueMakeStr;
-
 impl MakeStr for ReturnValueMakeStr {
     fn make_str_term(&self, _etype: &str, evalue: &String, result: &mut String) {
         result.push_str(evalue);
     }
 } 
+
+struct SkipMakeStr;
+impl MakeStr for SkipMakeStr {
+    fn make_str_term(&self, _etype: &str, _evalue: &String, _result: &mut String) {}
+}
 
 fn read_u8(data_stream: &mut Read) -> Result<u8, ParseError> {
     let mut len: [u8; 1] = [0];
@@ -97,43 +126,71 @@ fn read_i32(data_stream: &mut Read) -> Result<i32, ParseError> {
     Ok(i32::from_be_bytes(val))
 }
 
-fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+fn parse_skip(data_stream: &mut Read, n_skip: u32) -> ParseResult {
+    let mstr: &MakeStr = &ReturnValueMakeStr {};
+    let mut empty_skip: String = String::new();
+    for _ in 0..n_skip {
+        parse_any(data_stream, mstr, &mut empty_skip)?
+    }
+    Ok(())
+}
+
+fn parse_filtered(filter: &[u8], data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let term_type = read_u8(data_stream)?;
+    if filter.contains(&term_type) {
+        parse_term(term_type, data_stream, make_str, result)
+    } else {
+        Err(ParseError::new(ErrorCode::NotErlangBinary))
+    }
+}
+
+
+
+fn parse_any(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let term_type = read_u8(data_stream)?;
+    parse_term(term_type, data_stream, make_str, result)
+}
+
+fn parse_term(term_type: u8, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     match term_type {
-        108 => list_ext(data_stream, make_str, result),
-        107 => string_ext(data_stream, make_str, result),
-        98  => integer_ext(data_stream, make_str, result),
-        97  => small_integer_ext(data_stream, make_str, result),
-        100 => atom_ext(data_stream, make_str, result),
-        115 => small_atom_ext(data_stream, make_str, result),
-        104 => small_tuple_ext(data_stream, make_str, result),
-        105 => large_tuple_ext(data_stream, make_str, result),
-        109 => binary_ext(data_stream, make_str, result),
-        99  => float_ext(data_stream, make_str, result),
-        119 => small_atom_utf8_ext(data_stream, make_str, result),
-        118 => atom_utf8_ext(data_stream, make_str, result),
-        101 => reference_ext(data_stream, make_str, result),
-        102 => port_ext(data_stream, make_str, result),
-        82  => atom_cache_ref(data_stream, make_str, result),
-        103 => pid_ext(data_stream, make_str, result),
-        116 => map_ext(data_stream, make_str, result),
-        117 => fun_ext(data_stream, make_str, result),
-        110 => small_big_ext(data_stream, make_str, result),
-        111 => large_big_ext(data_stream, make_str, result),
-        114 => new_reference_ext(data_stream, make_str, result),
-        113 => export_ext(data_stream, make_str, result),
-        77  => bit_binary_ext(data_stream, make_str, result),
-        70  => new_float_ext(data_stream, make_str, result),
+        LIST_EXT            => list_ext(data_stream, make_str, result),
+        STRING_EXT          => string_ext(data_stream, make_str, result),
+        INTEGER_EXT         => integer_ext(data_stream, make_str, result),
+        SMALL_INTEGER_EXT   => small_integer_ext(data_stream, make_str, result),
+        ATOM_EXT            => atom_ext(data_stream, make_str, result),
+        SMALL_ATOM_EXT      => small_atom_ext(data_stream, make_str, result),
+        SMALL_TUPLE_EXT     => small_tuple_ext(data_stream, make_str, result),
+        LARGE_TUPLE_EXT     => large_tuple_ext(data_stream, make_str, result),
+        BINARY_EXT          => binary_ext(data_stream, make_str, result),
+        FLOAT_EXT           => float_ext(data_stream, make_str, result),
+        SMALL_ATOM_UTF8_EXT => small_atom_utf8_ext(data_stream, make_str, result),
+        ATOM_UTF8_EXT       => atom_utf8_ext(data_stream, make_str, result),
+        REFERENCE_EXT       => reference_ext(data_stream, make_str, result),
+        PORT_EXT            => port_ext(data_stream, make_str, result),
+        ATOM_CACHE_REF      => atom_cache_ref(data_stream, make_str, result),
+        PID_EXT             => pid_ext(data_stream, make_str, result),
+        MAP_EXT             => map_ext(data_stream, make_str, result),
+        FUN_EXT             => fun_ext(data_stream, make_str, result),
+        SMALL_BIG_EXT       => small_big_ext(data_stream, make_str, result),
+        LARGE_BIG_EXT       => large_big_ext(data_stream, make_str, result),
+        NEW_REFERENCE_EXT   => new_reference_ext(data_stream, make_str, result),
+        EXPORT_EXT          => export_ext(data_stream, make_str, result),
+        BIT_BINARY_EXT      => bit_binary_ext(data_stream, make_str, result),
+        NEW_FLOAT_EXT       => new_float_ext(data_stream, make_str, result),
+        NEW_FUN_EXT         => new_fun_ext(data_stream, make_str, result),
+        NIL_EXT             => Ok(()),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
 
+
+
 fn list_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let l = read_u32(data_stream)?;    
     let mut list_str: String = String::new();
-    let mut f = |x: &mut String| parse(data_stream, make_str, x);
+    let mut f = |x: &mut String| parse_any(data_stream, make_str, x);
     create_list(l, &mut list_str, &mut f)?;
-    if read_u8(data_stream)? == 106 {
+    if read_u8(data_stream)? == NIL_EXT {
         make_str.make_str_term("l", &list_str, result);
         Ok(())
     } else {
@@ -196,7 +253,7 @@ fn large_tuple_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Stri
 
 fn tuple(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut tuple_str: String = String::new();
-    let mut f = |x: &mut String| parse(data_stream, make_str, x);
+    let mut f = |x: &mut String| parse_any(data_stream, make_str, x);
     create_list(n, &mut tuple_str, &mut f)?;
     make_str.make_str_term("t", &tuple_str, result);
     Ok(()) 
@@ -256,7 +313,7 @@ fn atom_utf8(len: u16, data_stream: &mut Read, make_str: &MakeStr, result: &mut 
 
 fn reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut node: String = String::new();
-    parse(data_stream, make_str, &mut node)?;
+    parse_any(data_stream, make_str, &mut node)?;
     let res: String = format!(
         "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
         node, 
@@ -269,7 +326,7 @@ fn reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
 
 fn port_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut node: String = String::new();
-    parse(data_stream, make_str, &mut node)?;
+    parse_any(data_stream, make_str, &mut node)?;
     let res: String = format!(
         "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
         node, 
@@ -281,7 +338,7 @@ fn port_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> 
 }
 fn pid_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut node: String = String::new();
-    parse(data_stream, make_str, &mut node)?;
+    parse_any(data_stream, make_str, &mut node)?;
     let res: String = format!(
         "{{\"node\":{},\"id\":{},\"serial\":{},\"creation\":{}}}", 
         node, 
@@ -304,9 +361,9 @@ fn map_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> P
     let mut map_str: String = String::new();
     let mut f = |x: &mut String| -> ParseResult {
         x.push_str("{\"key\":");
-        parse(data_stream, make_str, x)?;
+        parse_any(data_stream, make_str, x)?;
         x.push_str(",\"val\":");
-        parse(data_stream, make_str, x)?;
+        parse_any(data_stream, make_str, x)?;
         x.push_str("}");
         Ok(())
     };
@@ -319,19 +376,17 @@ fn map_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> P
 fn fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let num_free = read_u32(data_stream)?;
     let mut pid = String::new();
-    parse(data_stream, make_str, &mut pid)?;
+    parse_any(data_stream, make_str, &mut pid)?;
     let mut module = String::new();
-    parse(data_stream, make_str, &mut module)?;
+    parse_any(data_stream, make_str, &mut module)?;
     let mut index = String::new();
-    parse(data_stream, make_str, &mut index)?;
+    parse_any(data_stream, make_str, &mut index)?;
     let mut uniq = String::new();
-    parse(data_stream, make_str, &mut uniq)?;
-    let mut free_vars = String::new();
-    let mut f = |x: &mut String| parse(data_stream, make_str, x);
-    create_list(num_free as u32, &mut free_vars, &mut f)?;
+    parse_any(data_stream, make_str, &mut uniq)?;
+    parse_skip(data_stream, num_free)?;
     let res: String = format!(
-        "{{\"pid\":{},\"mod\":{},\"index\":{},\"uniq\":{},\"vars\":{}}}", 
-        pid, module,  index, uniq, free_vars
+        "{{\"pid\":{},\"m\":{},\"index\":{},\"uniq\":{}}}", 
+        pid, module,  index, uniq
     );
     make_str.make_str_term("fun", &res.to_string(), result);
     Ok(())
@@ -359,10 +414,21 @@ fn big(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
 }
 
 fn new_reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let _len = read_u16(data_stream)?;
+    let mstr: &MakeStr = &ReturnValueMakeStr {};
+    let filter_atoms: [u8; 5] = [
+        SMALL_ATOM_UTF8_EXT,
+        ATOM_UTF8_EXT,
+        ATOM_CACHE_REF,
+        ATOM_EXT,
+        SMALL_ATOM_EXT
+    ];
+    let len = read_u16(data_stream)?;
     let mut node: String = String::new();
-    parse(data_stream, make_str, &mut node)?;
+    parse_filtered(&filter_atoms, data_stream, mstr, &mut node)?;
     let creation = read_u8(data_stream)?;
+    for _ in 0..len {
+        read_u32(data_stream)?;
+    };
     let res: String = format!(
         "{{\"node\":{},\"creation\":{}}}", 
         node, 
@@ -398,32 +464,22 @@ fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
 
 fn export_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mstr: &MakeStr = &ReturnValueMakeStr {};
-    let mut parse_atoms = |r: &mut String| -> ParseResult {
-        let term_type = read_u8(data_stream)?;
-        match term_type {
-            119 => small_atom_utf8_ext(data_stream, mstr, r),
-            118 => atom_utf8_ext(data_stream, mstr, r),
-            82  => atom_cache_ref(data_stream, mstr, r),
-            100 => atom_ext(data_stream, mstr, r),
-            115 => small_atom_ext(data_stream, mstr, r),
-            _ => Err(ParseError::new(ErrorCode::NotErlangBinary)),
-        }
-    };
+    let filter_atoms: [u8; 5] = [
+        SMALL_ATOM_UTF8_EXT,
+        ATOM_UTF8_EXT,
+        ATOM_CACHE_REF,
+        ATOM_EXT,
+        SMALL_ATOM_EXT
+    ];
     let mut module = String::new();
-    parse_atoms( &mut module)?;
+    parse_filtered(&filter_atoms, data_stream, mstr, &mut module)?;
     let mut func = String::new();
-    parse_atoms(&mut func)?;
+    parse_filtered(&filter_atoms, data_stream, mstr, &mut func)?;
     let mut arity = String::new();
-
-    match read_u8(data_stream)? {
-        97 => small_integer_ext(data_stream, mstr, &mut arity)?,
-        _ => return Err(ParseError::new(ErrorCode::NotErlangBinary)),
-    };
+    parse_filtered(&[SMALL_INTEGER_EXT], data_stream, mstr, &mut arity)?;
     let res: String = format!(
         "{{\"m\":{},\"f\":{},\"a\":{}}}", 
-        module, 
-        func,
-        arity
+        module, func, arity
     );
     make_str.make_str_term("efun", &res, result);
     Ok(())
@@ -433,6 +489,47 @@ fn new_float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
     data_stream.read_exact(&mut ieee_float)?;
     let fl = BigEndian::read_f64(&ieee_float).to_string();
     make_str.make_str_term("f", &fl, result);
+    Ok(())
+}
+
+
+fn new_fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let mstr: &MakeStr = &ReturnValueMakeStr {};
+    let filter_atoms: [u8; 5] = [
+        SMALL_ATOM_UTF8_EXT,
+        ATOM_UTF8_EXT,
+        ATOM_CACHE_REF,
+        ATOM_EXT,
+        SMALL_ATOM_EXT
+    ];
+    let _size = read_u32(data_stream)?;
+    let arity = read_u8(data_stream)?;
+    let mut uniq: [u8; 16] = [0; 16];
+    data_stream.read_exact(&mut uniq)?;
+    let uniq_hex = hex::encode(uniq.to_vec());
+    let index = read_u32(data_stream)?;
+    let num_free = read_u32(data_stream)?;
+
+    let mut module = String::new();
+    parse_filtered(&filter_atoms, data_stream, mstr, &mut module)?;
+    let mut old_index = String::new();
+    parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], data_stream, mstr, &mut old_index)?;
+    let mut old_uniq = String::new();
+    parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], data_stream, mstr, &mut old_uniq)?; 
+    let mut pid = String::new();
+    parse_filtered(&[PID_EXT], data_stream, mstr, &mut pid)?;
+    parse_skip(data_stream, num_free)?;
+    let res: String = format!(
+        "{{\"m\":{},\"a\":{},\"uniq\":\"{}\",\"index\":{},\"old_uniq\":{},\"old_index\":{},\"pid\":{}}}", 
+        module, 
+        arity,
+        uniq_hex,
+        index, 
+        old_uniq,
+        old_index,
+        pid
+    );
+    make_str.make_str_term("nfun", &res, result);
     Ok(())
 }
 
@@ -460,12 +557,12 @@ fn main() {
 }
 
 fn start_parsing(f: &mut Read) -> Result<String, ParseError> {
-    let mut is_erl: [u8; 1] = [0];
+   // let mut is_erl: [u8; 1] = [0];
     let mstr: &MakeStr = &DefaultMakeStr {};
     let mut res_str: String = String::new();
-    f.read_exact(&mut is_erl)?;
-    if is_erl[0] == 131 {
-        parse(f, mstr, &mut res_str)?;
+  //  f.read_exact(&mut is_erl)?;
+    if read_u8(f)? == 131 {
+        parse_any(f, mstr, &mut res_str)?;
         Ok(res_str)
     } else {
         Err(ParseError::new(ErrorCode::NotErlangBinary))
