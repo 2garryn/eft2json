@@ -82,12 +82,6 @@ trait MakeStr {
 struct DefaultMakeStr;
 impl MakeStr for DefaultMakeStr {
     fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String) {
-     /*   result.push_str("{\"t\":\"");
-        result.push_str(&etype);
-        result.push_str("\",\"v\":");
-        result.push_str(evalue);
-        result.push_str("}");
-        */
         result.push_str("{\"");
         result.push_str(etype);
         result.push_str("\":");
@@ -209,7 +203,7 @@ fn list_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> 
     let mut f = |x: &mut String| parse_any(data_stream, make_str, x);
     create_list(l, &mut list_str, &mut f)?;
     if read_u8(data_stream)? == NIL_EXT {
-        make_str.make_str_term("l", &list_str, result);
+        make_str.make_str_term("list", &list_str, result);
         Ok(())
     } else {
         Err(ParseError::new(ErrorCode::InvalidListTerm))
@@ -218,13 +212,13 @@ fn list_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> 
 
 fn integer_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let s = read_i32(data_stream)?.to_string();
-    make_str.make_str_term("i32", &s, result);
+    make_str.make_str_term("int", &s, result);
     Ok(())
 }
 
 fn small_integer_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let s = read_u8(data_stream)?.to_string();
-    make_str.make_str_term("i32", &s, result);
+    make_str.make_str_term("int", &s, result);
     Ok(())
 }
 
@@ -255,7 +249,7 @@ fn deprecated_atom(n: u16, data_stream: &mut Read, make_str: &MakeStr, result: &
         atom_term.push(read_u8(data_stream)? as char);
     };
     atom_term.push_str("\"");
-    make_str.make_str_term("a", &atom_term, result);
+    make_str.make_str_term("atom", &atom_term, result);
     Ok(())
 }
 
@@ -273,7 +267,7 @@ fn tuple(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String
     let mut tuple_str: String = String::new();
     let mut f = |x: &mut String| parse_any(data_stream, make_str, x);
     create_list(n, &mut tuple_str, &mut f)?;
-    make_str.make_str_term("t", &tuple_str, result);
+    make_str.make_str_term("tuple", &tuple_str, result);
     Ok(()) 
 }
 
@@ -284,7 +278,7 @@ fn float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) ->
     for n in 0..31 {
         res.push(float_arr[n] as char);
     }
-    make_str.make_str_term("f", &res, result);
+    make_str.make_str_term("float", &res, result);
     Ok(())
 }
 
@@ -299,7 +293,7 @@ fn binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -
         base64::encode(&v),
         "\"".to_string(),
     ].concat();
-    make_str.make_str_term("b", &s, result);
+    make_str.make_str_term("binary", &s, result);
     Ok(())
 }
 fn small_atom_utf8_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
@@ -321,7 +315,7 @@ fn atom_utf8(len: u16, data_stream: &mut Read, make_str: &MakeStr, result: &mut 
         str::from_utf8(&v)?.to_string(),
         "\"".to_string(),
     ].concat();
-    make_str.make_str_term("a", &s, result);
+    make_str.make_str_term("atom", &s, result);
     Ok(())
 }
 
@@ -382,7 +376,7 @@ fn map_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> P
         Ok(())
     };
     create_list(arity as u32, &mut map_str, &mut f)?;
-    make_str.make_str_term("m", &map_str.to_string(), result);
+    make_str.make_str_term("map", &map_str.to_string(), result);
     Ok(())
 }
 
@@ -423,7 +417,7 @@ fn big(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
         digits.push(read_u8(data_stream)?);
     };
     let r = BigInt::from_bytes_le(sign, &digits);
-    make_str.make_str_term("bi", &r.to_string(), result);
+    make_str.make_str_term("bigint", &r.to_string(), result);
     Ok(())
 }
 
@@ -440,7 +434,7 @@ fn new_reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut St
         node, 
         creation
     );
-    make_str.make_str_term("nref", &res, result);
+    make_str.make_str_term("newref", &res, result);
     Ok(())
 }
 
@@ -464,7 +458,7 @@ fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
         bits, 
         s
     );
-    make_str.make_str_term("bs", &res, result);
+    make_str.make_str_term("bitstr", &res, result);
     Ok(())
 }
 
@@ -480,14 +474,14 @@ fn export_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -
         "{{\"m\":{},\"f\":{},\"a\":{}}}", 
         module, func, arity
     );
-    make_str.make_str_term("efun", &res, result);
+    make_str.make_str_term("expfun", &res, result);
     Ok(())
 }
 fn new_float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut ieee_float: [u8; 8] = [0; 8];
     data_stream.read_exact(&mut ieee_float)?;
     let fl = BigEndian::read_f64(&ieee_float).to_string();
-    make_str.make_str_term("f", &fl, result);
+    make_str.make_str_term("float", &fl, result);
     Ok(())
 }
 
@@ -521,7 +515,7 @@ fn new_fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
         old_index,
         pid
     );
-    make_str.make_str_term("nfun", &res, result);
+    make_str.make_str_term("newfun", &res, result);
     Ok(())
 }
 
@@ -549,10 +543,8 @@ fn main() {
 }
 
 fn start_parsing(f: &mut Read) -> Result<String, ParseError> {
-   // let mut is_erl: [u8; 1] = [0];
     let mstr: &MakeStr = &DefaultMakeStr {};
     let mut res_str: String = String::new();
-  //  f.read_exact(&mut is_erl)?;
     if read_u8(f)? == 131 {
         parse_any(f, mstr, &mut res_str)?;
         Ok(res_str)
