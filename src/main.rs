@@ -5,6 +5,7 @@ use std::str;
 use std::io;
 use num_bigint::Sign;
 use num_bigint::BigInt;
+use byteorder::{ByteOrder, BigEndian};
 
 
 
@@ -122,6 +123,7 @@ fn parse(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> Par
         114 => new_reference_ext(data_stream, make_str, result),
         113 => export_ext(data_stream, make_str, result),
         77  => bit_binary_ext(data_stream, make_str, result),
+        70  => new_float_ext(data_stream, make_str, result),
         _ => Err(ParseError::new(ErrorCode::NotImplemented)),
     }
 }
@@ -426,7 +428,13 @@ fn export_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -
     make_str.make_str_term("efun", &res, result);
     Ok(())
 }
-
+fn new_float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+    let mut ieee_float: [u8; 8] = [0; 8];
+    data_stream.read_exact(&mut ieee_float)?;
+    let fl = BigEndian::read_f64(&ieee_float).to_string();
+    make_str.make_str_term("f", &fl, result);
+    Ok(())
+}
 
 
 fn create_list<F>(n: u32, result: &mut String, lf: &mut F) -> ParseResult 
