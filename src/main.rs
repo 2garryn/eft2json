@@ -82,9 +82,15 @@ trait MakeStr {
 struct DefaultMakeStr;
 impl MakeStr for DefaultMakeStr {
     fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String) {
-        result.push_str("{\"t\":\"");
+     /*   result.push_str("{\"t\":\"");
         result.push_str(&etype);
         result.push_str("\",\"v\":");
+        result.push_str(evalue);
+        result.push_str("}");
+        */
+        result.push_str("{\"");
+        result.push_str(etype);
+        result.push_str("\":");
         result.push_str(evalue);
         result.push_str("}");
     }
@@ -286,9 +292,7 @@ fn binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -
     let len = read_u32(data_stream)?;
     let mut v: Vec<u8> = vec![];
     for _ in 0..len {
-        let mut one_b: [u8; 1] = [0];
-        data_stream.read_exact(&mut one_b)?;
-        v.push(one_b[0]);
+        v.push(read_u8(data_stream)?);
     };
     let s = [
         "\"".to_string(),
@@ -310,9 +314,7 @@ fn atom_utf8_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
 fn atom_utf8(len: u16, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut v: Vec<u8> = vec![];
     for _ in 0..len {
-        let mut one_b: [u8; 1] = [0];
-        data_stream.read_exact(&mut one_b)?;
-        v.push(one_b[0]);
+        v.push(read_u8(data_stream)?);
     };
     let s = [
         "\"".to_string(),
