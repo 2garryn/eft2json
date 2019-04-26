@@ -127,12 +127,24 @@ fn read_i32(data_stream: &mut Read) -> Result<i32, ParseError> {
 }
 
 fn parse_skip(data_stream: &mut Read, n_skip: u32) -> ParseResult {
-    let mstr: &MakeStr = &ReturnValueMakeStr {};
+    let mstr: &MakeStr = &SkipMakeStr {};
     let mut empty_skip: String = String::new();
     for _ in 0..n_skip {
         parse_any(data_stream, mstr, &mut empty_skip)?
     }
     Ok(())
+}
+
+fn parse_atom_only(data_stream: &mut Read, result: &mut String) -> ParseResult {
+    let mstr: &MakeStr = &ReturnValueMakeStr {};
+    let filter_atoms: [u8; 5] = [
+        SMALL_ATOM_UTF8_EXT,
+        ATOM_UTF8_EXT,
+        ATOM_CACHE_REF,
+        ATOM_EXT,
+        SMALL_ATOM_EXT
+    ];
+    parse_filtered(&filter_atoms, data_stream, mstr, result)
 }
 
 fn parse_filtered(filter: &[u8], data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
@@ -313,7 +325,7 @@ fn atom_utf8(len: u16, data_stream: &mut Read, make_str: &MakeStr, result: &mut 
 
 fn reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut node: String = String::new();
-    parse_any(data_stream, make_str, &mut node)?;
+    parse_atom_only(data_stream, &mut node)?;
     let res: String = format!(
         "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
         node, 
@@ -326,7 +338,7 @@ fn reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
 
 fn port_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut node: String = String::new();
-    parse_any(data_stream, make_str, &mut node)?;
+    parse_atom_only(data_stream, &mut node)?;
     let res: String = format!(
         "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
         node, 
@@ -338,7 +350,7 @@ fn port_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> 
 }
 fn pid_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mut node: String = String::new();
-    parse_any(data_stream, make_str, &mut node)?;
+    parse_atom_only(data_stream, &mut node)?;
     let res: String = format!(
         "{{\"node\":{},\"id\":{},\"serial\":{},\"creation\":{}}}", 
         node, 
@@ -378,7 +390,7 @@ fn fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> P
     let mut pid = String::new();
     parse_any(data_stream, make_str, &mut pid)?;
     let mut module = String::new();
-    parse_any(data_stream, make_str, &mut module)?;
+    parse_atom_only(data_stream, &mut module)?;
     let mut index = String::new();
     parse_any(data_stream, make_str, &mut index)?;
     let mut uniq = String::new();
@@ -414,17 +426,9 @@ fn big(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
 }
 
 fn new_reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mstr: &MakeStr = &ReturnValueMakeStr {};
-    let filter_atoms: [u8; 5] = [
-        SMALL_ATOM_UTF8_EXT,
-        ATOM_UTF8_EXT,
-        ATOM_CACHE_REF,
-        ATOM_EXT,
-        SMALL_ATOM_EXT
-    ];
     let len = read_u16(data_stream)?;
     let mut node: String = String::new();
-    parse_filtered(&filter_atoms, data_stream, mstr, &mut node)?;
+    parse_atom_only(data_stream, &mut node)?;
     let creation = read_u8(data_stream)?;
     for _ in 0..len {
         read_u32(data_stream)?;
@@ -464,17 +468,10 @@ fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut Strin
 
 fn export_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mstr: &MakeStr = &ReturnValueMakeStr {};
-    let filter_atoms: [u8; 5] = [
-        SMALL_ATOM_UTF8_EXT,
-        ATOM_UTF8_EXT,
-        ATOM_CACHE_REF,
-        ATOM_EXT,
-        SMALL_ATOM_EXT
-    ];
     let mut module = String::new();
-    parse_filtered(&filter_atoms, data_stream, mstr, &mut module)?;
+    parse_atom_only(data_stream, &mut module)?;
     let mut func = String::new();
-    parse_filtered(&filter_atoms, data_stream, mstr, &mut func)?;
+    parse_atom_only(data_stream, &mut func)?;
     let mut arity = String::new();
     parse_filtered(&[SMALL_INTEGER_EXT], data_stream, mstr, &mut arity)?;
     let res: String = format!(
@@ -495,13 +492,6 @@ fn new_float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String
 
 fn new_fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
     let mstr: &MakeStr = &ReturnValueMakeStr {};
-    let filter_atoms: [u8; 5] = [
-        SMALL_ATOM_UTF8_EXT,
-        ATOM_UTF8_EXT,
-        ATOM_CACHE_REF,
-        ATOM_EXT,
-        SMALL_ATOM_EXT
-    ];
     let _size = read_u32(data_stream)?;
     let arity = read_u8(data_stream)?;
     let mut uniq: [u8; 16] = [0; 16];
@@ -511,7 +501,7 @@ fn new_fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
     let num_free = read_u32(data_stream)?;
 
     let mut module = String::new();
-    parse_filtered(&filter_atoms, data_stream, mstr, &mut module)?;
+    parse_atom_only(data_stream, &mut module)?;
     let mut old_index = String::new();
     parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], data_stream, mstr, &mut old_index)?;
     let mut old_uniq = String::new();
