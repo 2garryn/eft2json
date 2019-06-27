@@ -1,5 +1,5 @@
 
-use std::io::Read;
+use std::io::{BufRead, Read, BufReader};
 use std::fmt;
 use std::str;
 use std::io;
@@ -47,6 +47,97 @@ const SMALL_ATOM_UTF8_EXT: u8 = 119;
 const ATOM_EXT: u8 = 100;
 const SMALL_ATOM_EXT: u8 = 115;
 
+
+trait ElemCompose {
+    fn open(&mut self, name: &str);
+    fn push_u8(&mut self, elem: &[u8]);
+    fn push_str<T: AsRef<str>>(&mut self, elem: &T);
+    fn close(&mut self);
+    fn get_result(&self) -> String;
+}
+
+trait ReadStream {
+    fn read_u8(&mut self) -> Result<u8, ParseError>;
+    fn read_u16(&mut self) -> Result<u16, ParseError>;
+    fn read_u32(&mut self) -> Result<u32, ParseError>;
+    fn read_i32(&mut self) -> Result<i32, ParseError>;
+}
+
+
+
+struct DefaultComposer {
+    result: String
+}
+
+impl DefaultComposer {
+    fn new() -> DefaultComposer {
+        DefaultComposer{
+            result: String::new()
+        }
+    }
+}
+
+impl ElemCompose for DefaultComposer {
+    fn open(&mut self, name: &str) {
+        self.result.push_str("{\"");
+        self.result.push_str(name);
+        self.result.push_str("\":");
+    }
+    fn push_u8(&mut self, elem: &[u8]) {
+
+    }
+    fn push_str<T: AsRef<str>>(&mut self, elem: &T) {
+        self.result.push_str(elem.as_ref())
+    }
+    fn close(&mut self) {
+        self.result.push_str("}");
+    }
+
+    fn get_result(&self) -> String {
+        self.result.clone()
+    }
+ }
+
+
+struct DefaultStreamer<'a> {
+    buf_reader: &'a mut BufRead
+}
+
+impl <'a>DefaultStreamer<'a> {
+    fn new<R: BufRead>(buff: &'a mut R) -> DefaultStreamer {
+        DefaultStreamer{
+            buf_reader: buff
+        }
+    }
+}
+
+
+impl<'a> ReadStream for DefaultStreamer<'a> {
+    fn read_u8(&mut self) -> Result<u8, ParseError> {
+        let mut b: [u8; 1] = [0];
+        self.buf_reader.read_exact(&mut b)?;
+        Ok(u8::from_be_bytes(b))
+    }
+    fn read_u16(&mut self) -> Result<u16, ParseError> {
+        let mut b: [u8; 2] = [0; 2];
+        self.buf_reader.read_exact(&mut b)?;
+        Ok(u16::from_be_bytes(b))
+    }
+    fn read_u32(&mut self) -> Result<u32, ParseError> {
+        let mut b: [u8; 4] = [0; 4];
+        self.buf_reader.read_exact(&mut b)?;
+        Ok(u32::from_be_bytes(b))
+    }
+    fn read_i32(&mut self) -> Result<i32, ParseError> {
+        let mut b: [u8; 4] = [0; 4];
+        self.buf_reader.read_exact(&mut b)?;
+        Ok(i32::from_be_bytes(b))
+    }
+}
+
+
+
+
 struct ParseError {
     error_code: ErrorCode
 }
@@ -72,6 +163,7 @@ impl From<std::str::Utf8Error> for ParseError {
         ParseError::new(ErrorCode::NotUtf8Atom)
     }
 }
+
 
 
 
@@ -536,20 +628,28 @@ fn create_list<F>(n: u32, result: &mut String, lf: &mut F) -> ParseResult
 
 fn main() {
     let mut f = io::stdin();
-    match start_parsing(&mut f) {
+    let mut bf = BufReader::new(f);
+    match start_parsing(&mut bf) {
         Ok(json) => println!("{}", json),
         Err(error) => println!("Error: {}", error),
     }
 }
 
-fn start_parsing(f: &mut Read) -> Result<String, ParseError> {
-    let mstr: &MakeStr = &DefaultMakeStr {};
-    let mut res_str: String = String::new();
+fn start_parsing<BF: BufRead>(f: &mut BF) -> Result<String, ParseError> {
+    let mut stream = DefaultStreamer::new(f);
+    let mut composer = DefaultComposer::new();
+    if stream.read_u8()? == 131 {
+        Ok(composer.get_result())
+    } else {
+        Err(ParseError::new(ErrorCode::NotErlangBinary))
+    }
+    /*
     if read_u8(f)? == 131 {
         parse_any(f, mstr, &mut res_str)?;
         Ok(res_str)
     } else {
         Err(ParseError::new(ErrorCode::NotErlangBinary))
     }
+    */
 }
 
