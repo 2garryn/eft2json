@@ -1,5 +1,5 @@
 
-use std::io::{BufRead, Read, BufReader};
+use std::io::{BufRead, BufReader};
 use std::fmt;
 use std::str;
 use std::io;
@@ -50,11 +50,9 @@ const SMALL_ATOM_EXT: u8 = 115;
 
 trait ElemCompose {
     fn open(&mut self, name: &str);
-    fn push_u8(&mut self, elem: &[u8]);
     fn push_str<T: AsRef<str>>(&mut self, elem: T);
     fn push_char(&mut self, elem: char);
     fn close(&mut self);
-    fn get_result(&self) -> String;
 }
 
 trait ReadStream {
@@ -62,6 +60,7 @@ trait ReadStream {
     fn read_u16(&mut self) -> Result<u16, ParseError>;
     fn read_u32(&mut self) -> Result<u32, ParseError>;
     fn read_i32(&mut self) -> Result<i32, ParseError>;
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ParseError>;
 }
 
 
@@ -84,9 +83,6 @@ impl ElemCompose for DefaultComposer {
         self.result.push_str(name);
         self.result.push_str("\":");
     }
-    fn push_u8(&mut self, elem: &[u8]) {
-
-    }
     fn push_str<T: AsRef<str>>(&mut self, elem: T) {
         self.result.push_str(elem.as_ref())
     }
@@ -96,11 +92,56 @@ impl ElemCompose for DefaultComposer {
     fn close(&mut self) {
         self.result.push_str("}");
     }
+}
 
-    fn get_result(&self) -> String {
-        self.result.clone()
+struct RawStringComposer<'a> {
+    result: &'a mut String
+}
+
+impl <'a>RawStringComposer<'a> {
+    fn new(res_str: &'a mut String) -> RawStringComposer {
+        RawStringComposer{
+            result: res_str
+        }
     }
- }
+}
+
+impl<'a> ElemCompose for RawStringComposer<'a> {
+    fn open(&mut self, _name: &str) {}
+    fn push_str<T: AsRef<str>>(&mut self, elem: T) {
+        self.result.push_str(elem.as_ref())
+    }
+    fn push_char(&mut self, elem: char) {
+        self.result.push(elem);
+    }
+    fn close(&mut self) {}
+}
+
+impl ElemCompose for String {
+    fn open(&mut self, name: &str) {
+        self.push_str("{\"");
+        self.push_str(name);
+        self.push_str("\":");
+    }
+    fn push_str<T: AsRef<str>>(&mut self, elem: T) {
+        self.push_str(elem.as_ref())
+    }
+    fn push_char(&mut self, elem: char) {
+        self.push(elem);
+    }
+    fn close(&mut self) {
+        self.push_str("}");
+    }
+}
+
+struct SkipComposer;
+
+impl ElemCompose for SkipComposer {
+    fn open(&mut self, _name: &str) {}
+    fn push_str<T: AsRef<str>>(&mut self, _elem: T) {}
+    fn push_char(&mut self, _elem: char) {}
+    fn close(&mut self) {}
+}
 
 
 struct DefaultStreamer<'a> {
@@ -137,6 +178,10 @@ impl<'a> ReadStream for DefaultStreamer<'a> {
         self.buf_reader.read_exact(&mut b)?;
         Ok(i32::from_be_bytes(b))
     }
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), ParseError> {
+        self.buf_reader.read_exact(buf)?;
+        Ok(())
+    }
 }
 
 
@@ -169,70 +214,15 @@ impl From<std::str::Utf8Error> for ParseError {
 }
 
 
-
-
-trait MakeStr {
-    fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String);
-}
-
-struct DefaultMakeStr;
-impl MakeStr for DefaultMakeStr {
-    fn make_str_term(&self, etype: &str, evalue: &String, result: &mut String) {
-        result.push_str("{\"");
-        result.push_str(etype);
-        result.push_str("\":");
-        result.push_str(evalue);
-        result.push_str("}");
-    }
-}
-
-struct ReturnValueMakeStr;
-impl MakeStr for ReturnValueMakeStr {
-    fn make_str_term(&self, _etype: &str, evalue: &String, result: &mut String) {
-        result.push_str(evalue);
-    }
-} 
-
-struct SkipMakeStr;
-impl MakeStr for SkipMakeStr {
-    fn make_str_term(&self, _etype: &str, _evalue: &String, _result: &mut String) {}
-}
-
-fn read_u8(data_stream: &mut Read) -> Result<u8, ParseError> {
-    let mut len: [u8; 1] = [0];
-    data_stream.read_exact(&mut len)?;
-    Ok(u8::from_be_bytes(len))
-}
-
-fn read_u16(data_stream: &mut Read) -> Result<u16, ParseError> {
-    let mut len: [u8; 2] = [0; 2];
-    data_stream.read_exact(&mut len)?;
-    Ok(u16::from_be_bytes(len))
-}
-
-fn read_u32(data_stream: &mut Read) -> Result<u32, ParseError> {
-    let mut len: [u8; 4] = [0; 4];
-    data_stream.read_exact(&mut len)?;
-    Ok(u32::from_be_bytes(len))
-}
-
-fn read_i32(data_stream: &mut Read) -> Result<i32, ParseError> {
-    let mut val: [u8; 4] = [0; 4];
-    data_stream.read_exact(&mut val)?;
-    Ok(i32::from_be_bytes(val))
-}
-
-fn parse_skip(data_stream: &mut Read, n_skip: u32) -> ParseResult {
-    let mstr: &MakeStr = &SkipMakeStr {};
-    let mut empty_skip: String = String::new();
+fn parse_skip<S: ReadStream>(s: &mut S, n_skip: u32) -> ParseResult {
+    let mut skip_comp = SkipComposer{};
     for _ in 0..n_skip {
-        parse_any(data_stream, mstr, &mut empty_skip)?
+        parse_any(s, &mut skip_comp)?
     }
     Ok(())
 }
 
-fn parse_atom_only(data_stream: &mut Read, result: &mut String) -> ParseResult {
-    let mstr: &MakeStr = &ReturnValueMakeStr {};
+fn parse_atom_only<S: ReadStream>(s: &mut S, res: &mut String) -> ParseResult {
     let filter_atoms: [u8; 5] = [
         SMALL_ATOM_UTF8_EXT,
         ATOM_UTF8_EXT,
@@ -240,13 +230,14 @@ fn parse_atom_only(data_stream: &mut Read, result: &mut String) -> ParseResult {
         ATOM_EXT,
         SMALL_ATOM_EXT
     ];
-    parse_filtered(&filter_atoms, data_stream, mstr, result)
+    parse_filtered(&filter_atoms, s, res)
 }
 
-fn parse_filtered(filter: &[u8], data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let term_type = read_u8(data_stream)?;
+fn parse_filtered<S: ReadStream>(filter: &[u8], s: &mut S, res: &mut String) -> ParseResult {
+    let term_type = s.read_u8()?;
     if filter.contains(&term_type) {
-        parse_term(term_type, data_stream, make_str, result)
+        let mut str_comp = RawStringComposer::new(res);
+        parse_term(term_type, s, &mut str_comp)
     } else {
         Err(ParseError::new(ErrorCode::NotErlangBinary))
     }
@@ -256,12 +247,6 @@ fn parse_any<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult
     parse_term(s.read_u8()?, s, c)
 }
 
-/*
-fn parse_any(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let term_type = read_u8(data_stream)?;
-    parse_term(term_type, data_stream, make_str, result)
-}
-*/
 fn parse_term<S: ReadStream, C: ElemCompose>(ttype: u8, s: &mut S, c: &mut C) -> ParseResult {
     match ttype {
         LIST_EXT            => list_ext(s, c),
@@ -300,7 +285,14 @@ fn list_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult 
     c.open("list");
     let l = s.read_u32()?;    
    // let mut f = || parse_any(s, c);
-    create_list(l, c, &mut || parse_any(s, c))?;
+    c.push_char('[');
+    for i in 0..l {
+        parse_any(s, c)?;
+        if i + 1 < l {
+            c.push_char(',');
+        }
+    };
+    c.push_char(']');
     if s.read_u8()? == NIL_EXT {
         c.close();
         Ok(())
@@ -326,12 +318,14 @@ fn small_integer_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> Par
 fn string_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
     c.open("str");
     let l = s.read_u16()?;
-    let mut f = || -> ParseResult {
-        let ch = s.read_u8()? as char;
-        c.push_char(ch);
-        Ok(())
+    c.push_char('[');
+    for i in 0..l {
+        c.push_char(s.read_u8()? as char);
+        if i + 1 < l {
+            c.push_char(',');
+        }
     };
-    create_list(l as u32, c, &mut f)?;
+    c.push_char(']');
     c.close();
     Ok(())
 }
@@ -357,19 +351,26 @@ fn small_tuple_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C)-> ParseR
 }
 
 fn large_tuple_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C)-> ParseResult {
-    tuple(s.read_u32()? as u32, s, c)
+    tuple(s.read_u32()?, s, c)
 }
 
 fn tuple<S: ReadStream, C: ElemCompose>(n: u32, s: &mut S, c: &mut C) -> ParseResult {
     c.open("tuple");
-    create_list(n, c, &mut || parse_any(s, c))?;
+        c.push_char('[');
+    for i in 0..n {
+        parse_any(s, c)?;
+        if i + 1 < n {
+            c.push_char(',');
+        }
+    };
+    c.push_char(']');
     c.close();
     Ok(()) 
 }
 
 fn float_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C)-> ParseResult {
     c.open("float");
-    for n in 0..31 {
+    for _ in 0..31 {
         c.push_char(s.read_u8()? as char);
     };
     c.close();
@@ -396,207 +397,212 @@ fn atom_utf8_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseRe
     atom_utf8(s.read_u16()? as u16, s, c)
 }
 
-fn atom_utf8(len: u16, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+fn atom_utf8<S: ReadStream, C: ElemCompose>(len: u16, s: &mut S, c: &mut C) -> ParseResult {
+    c.open("atom");
     let mut v: Vec<u8> = vec![];
     for _ in 0..len {
-        v.push(read_u8(data_stream)?);
+        v.push(s.read_u8()?);
     };
-    let s = [
-        "\"".to_string(),
-        str::from_utf8(&v)?.to_string(),
-        "\"".to_string(),
-    ].concat();
-    make_str.make_str_term("atom", &s, result);
+    c.push_char('\"');
+    c.push_str(str::from_utf8(&v)?);
+    c.push_char('\"');
+    c.close();
     Ok(())
 }
 
-fn reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+fn reference_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("ref");
     let mut node: String = String::new();
-    parse_atom_only(data_stream, &mut node)?;
-    let res: String = format!(
-        "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
-        node, 
-        read_u32(data_stream)?, 
-        read_u8(data_stream)?
-    );
-    make_str.make_str_term("ref", &res, result);
+    parse_atom_only(s, &mut node)?;
+    c.push_str("{\"node\":");
+    c.push_str(node);
+    c.push_str(",\"id\":");
+    c.push_str(s.read_u32()?.to_string());
+    c.push_str(",\"creation\":");
+    c.push_str(s.read_u8()?.to_string());
+    c.push_char('}');
+    c.close();
     Ok(())
 }
 
-fn port_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+fn port_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("port");
     let mut node: String = String::new();
-    parse_atom_only(data_stream, &mut node)?;
-    let res: String = format!(
-        "{{\"node\":{},\"id\":{},\"creation\":{}}}", 
-        node, 
-        read_u32(data_stream)?, 
-        read_u8(data_stream)?
-    );
-    make_str.make_str_term("port", &res, result);
+    parse_atom_only(s, &mut node)?;
+    c.push_str("{\"node\":");
+    c.push_str(node);
+    c.push_str(",\"id\":");
+    c.push_str(s.read_u32()?.to_string());
+    c.push_str(",\"creation\":");
+    c.push_str(s.read_u8()?.to_string());
+    c.push_char('}');
+    c.close();
     Ok(())
 }
-fn pid_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+fn pid_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("pid");
     let mut node: String = String::new();
-    parse_atom_only(data_stream, &mut node)?;
-    let res: String = format!(
-        "{{\"node\":{},\"id\":{},\"serial\":{},\"creation\":{}}}", 
-        node, 
-        read_u32(data_stream)?, 
-        read_u32(data_stream)?,
-        read_u8(data_stream)?
-    );
-    make_str.make_str_term("pid", &res, result);
+    parse_atom_only(s, &mut node)?;
+    c.push_str("{\"node\":");
+    c.push_str(node);
+    c.push_str(",\"id\":");
+    c.push_str(s.read_u32()?.to_string());
+    c.push_str(",\"serial\":");
+    c.push_str(s.read_u32()?.to_string());
+    c.push_str(",\"creation\":");
+    c.push_str(s.read_u8()?.to_string());
+    c.push_char('}');
+    c.close();
     Ok(())
 }
 
-fn atom_cache_ref(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let acr = read_u8(data_stream)?;
-    make_str.make_str_term("acr", &acr.to_string(), result);
+fn atom_cache_ref<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("acr");
+    c.push_str(s.read_u8()?.to_string());
+    c.close();
     Ok(())
 }
 
-fn map_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let arity = read_u32(data_stream)?;
-    let mut map_str: String = String::new();
-    let mut f = |x: &mut String| -> ParseResult {
-        x.push_str("{\"key\":");
-        parse_any(data_stream, make_str, x)?;
-        x.push_str(",\"val\":");
-        parse_any(data_stream, make_str, x)?;
-        x.push_str("}");
-        Ok(())
+fn map_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("map");
+    let n = s.read_u32()?;
+    c.push_char('[');
+    for i in 0..n {
+        c.push_str("{\"key\":");
+        parse_any(s, c)?;
+        c.push_str(",\"val\":");
+        parse_any(s, c)?;
+        c.push_str("}");
+        if i + 1 < n {
+            c.push_char(',');
+        }
     };
-    create_list(arity as u32, &mut map_str, &mut f)?;
-    make_str.make_str_term("map", &map_str.to_string(), result);
+    c.push_char(']');
+    c.close();
     Ok(())
 }
 
 
-fn fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let num_free = read_u32(data_stream)?;
+fn fun_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    let num_free = s.read_u32()?;
     let mut pid = String::new();
-    parse_any(data_stream, make_str, &mut pid)?;
+    parse_any(s, &mut pid)?;
     let mut module = String::new();
-    parse_atom_only(data_stream, &mut module)?;
+    parse_atom_only(s, &mut module)?;
     let mut index = String::new();
-    parse_any(data_stream, make_str, &mut index)?;
+    parse_any(s, &mut index)?;
     let mut uniq = String::new();
-    parse_any(data_stream, make_str, &mut uniq)?;
-    parse_skip(data_stream, num_free)?;
-    let res: String = format!(
+    parse_any(s, &mut uniq)?;
+    parse_skip(s, num_free)?;
+    c.push_str(format!(
         "{{\"pid\":{},\"m\":{},\"index\":{},\"uniq\":{}}}", 
         pid, module,  index, uniq
-    );
-    make_str.make_str_term("fun", &res.to_string(), result);
+    ));
+    c.close();
     Ok(())
 }
 
-fn small_big_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let n = read_u8(data_stream)?;
-    big(n as u32, data_stream, make_str, result)
+fn small_big_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    big(s.read_u8()? as usize, s, c)
 }
 
-fn large_big_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let n = read_u32(data_stream)?;
-    big(n, data_stream, make_str, result)
+fn large_big_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    big(s.read_u32()? as usize, s, c)
 }
-
-fn big(n: u32, data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let sign: Sign = if read_u8(data_stream)? > 0 { Sign::Minus } else { Sign::Plus};
-    let mut digits: Vec<u8> = vec![];
+// TODO: deside best type
+fn big<S: ReadStream, C: ElemCompose>(n: usize, s: &mut S, c: &mut C) -> ParseResult {
+    c.open("bigint");
+    let sign: Sign = if s.read_u8()? > 0 { Sign::Minus } else { Sign::Plus};
+    let mut digits: Vec<u8> = Vec::with_capacity(n);
     for _ in 0..n {
-        digits.push(read_u8(data_stream)?);
+        digits.push(s.read_u8()?);
     };
     let r = BigInt::from_bytes_le(sign, &digits);
-    make_str.make_str_term("bigint", &r.to_string(), result);
+    c.push_str(r.to_string());
     Ok(())
 }
 
-fn new_reference_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let len = read_u16(data_stream)?;
+fn new_reference_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    let len = s.read_u16()?;
     let mut node: String = String::new();
-    parse_atom_only(data_stream, &mut node)?;
-    let creation = read_u8(data_stream)?;
+    parse_atom_only(s, &mut node)?;
+    let creation = s.read_u8()?;
     for _ in 0..len {
-        read_u32(data_stream)?;
+        s.read_u32()?;
     };
-    let res: String = format!(
+    c.push_str(format!(
         "{{\"node\":{},\"creation\":{}}}", 
         node, 
         creation
-    );
-    make_str.make_str_term("newref", &res, result);
+    ));
+    c.close();
     Ok(())
 }
 
 
-fn bit_binary_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let len = read_u32(data_stream)?;
-    let bits = read_u8(data_stream)?;
+fn bit_binary_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("bitstr");
+    let len = s.read_u32()?;
+    let bits = s.read_u8()?;
     let mut v: Vec<u8> = vec![];
     for _ in 0..len {
-        let mut one_b: [u8; 1] = [0];
-        data_stream.read_exact(&mut one_b)?;
-        v.push(one_b[0]);
+        v.push(s.read_u8()?);
     };
-    let s = [
-        "\"".to_string(),
-        base64::encode(&v),
-        "\"".to_string(),
-    ].concat();
-    let res: String = format!(
-        "{{\"bits\":{},\"data\":{}}}", 
-        bits, 
-        s
-    );
-    make_str.make_str_term("bitstr", &res, result);
+    c.push_str("{\"bits\":");
+    c.push_str(bits.to_string());
+    c.push_str(",\"data\":\"");
+    c.push_str(base64::encode(&v));
+    c.push_str("\"}");
+    c.close();
     Ok(())
 }
 
-fn export_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mstr: &MakeStr = &ReturnValueMakeStr {};
+fn export_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("expfun");
     let mut module = String::new();
-    parse_atom_only(data_stream, &mut module)?;
+    parse_atom_only(s, &mut module)?;
     let mut func = String::new();
-    parse_atom_only(data_stream, &mut func)?;
+    parse_atom_only(s, &mut func)?;
     let mut arity = String::new();
-    parse_filtered(&[SMALL_INTEGER_EXT], data_stream, mstr, &mut arity)?;
-    let res: String = format!(
-        "{{\"m\":{},\"f\":{},\"a\":{}}}", 
-        module, func, arity
-    );
-    make_str.make_str_term("expfun", &res, result);
+    parse_filtered(&[SMALL_INTEGER_EXT], s, &mut arity)?;
+    c.push_str("{\"m\":"); c.push_str(module);
+    c.push_str(",\"f\":"); c.push_str(func);
+    c.push_str(",\"a\":"); c.push_str(arity);
+    c.push_char('}');
+    c.close();
     Ok(())
 }
-fn new_float_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
+fn new_float_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("float");
     let mut ieee_float: [u8; 8] = [0; 8];
-    data_stream.read_exact(&mut ieee_float)?;
+    s.read_exact(&mut ieee_float)?;
     let fl = BigEndian::read_f64(&ieee_float).to_string();
-    make_str.make_str_term("float", &fl, result);
+    c.push_str(fl);
+    c.close();
     Ok(())
 }
 
 
-fn new_fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) -> ParseResult {
-    let mstr: &MakeStr = &ReturnValueMakeStr {};
-    let _size = read_u32(data_stream)?;
-    let arity = read_u8(data_stream)?;
+fn new_fun_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("newfun");
+    let _size = s.read_u32()?;
+    let arity = s.read_u8()?;
     let mut uniq: [u8; 16] = [0; 16];
-    data_stream.read_exact(&mut uniq)?;
+    s.read_exact(&mut uniq)?;
     let uniq_hex = hex::encode(uniq.to_vec());
-    let index = read_u32(data_stream)?;
-    let num_free = read_u32(data_stream)?;
+    let index = s.read_u32()?;
+    let num_free = s.read_u32()?;
 
     let mut module = String::new();
-    parse_atom_only(data_stream, &mut module)?;
+    parse_atom_only(s, &mut module)?;
     let mut old_index = String::new();
-    parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], data_stream, mstr, &mut old_index)?;
+    parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], s, &mut old_index)?;
     let mut old_uniq = String::new();
-    parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], data_stream, mstr, &mut old_uniq)?; 
+    parse_filtered(&[INTEGER_EXT, SMALL_INTEGER_EXT], s, &mut old_uniq)?; 
     let mut pid = String::new();
-    parse_filtered(&[PID_EXT], data_stream, mstr, &mut pid)?;
-    parse_skip(data_stream, num_free)?;
-    let res: String = format!(
+    parse_filtered(&[PID_EXT], s, &mut pid)?;
+    parse_skip(s, num_free)?;
+    c.push_str(format!(
         "{{\"m\":{},\"a\":{},\"uniq\":\"{}\",\"index\":{},\"old_uniq\":{},\"old_index\":{},\"pid\":{}}}", 
         module, 
         arity,
@@ -605,22 +611,8 @@ fn new_fun_ext(data_stream: &mut Read, make_str: &MakeStr, result: &mut String) 
         old_uniq,
         old_index,
         pid
-    );
-    make_str.make_str_term("newfun", &res, result);
-    Ok(())
-}
-
-
-fn create_list<F, C>(n: u32, c: &mut C, lf: &mut F) -> ParseResult 
-    where F: FnMut() -> ParseResult, C: ElemCompose {
-    c.push_str("[");
-    for i in 0..n {
-        lf()?;
-        if i + 1 < n {
-            c.push_str(",");
-        }
-    };
-    c.push_str("]");
+    ));
+    c.close();
     Ok(())
 }
 
@@ -636,20 +628,12 @@ fn main() {
 
 fn start_parsing<BF: BufRead>(f: &mut BF) -> Result<String, ParseError> {
     let mut stream = DefaultStreamer::new(f);
-    let mut composer = DefaultComposer::new();
+    let mut composer = String::new();
     if stream.read_u8()? == 131 {
-        parse_any(&stream, &composer)
-        Ok(composer.get_result())
+        parse_any(&mut stream, &mut composer)?;
+        Ok(composer)
     } else {
         Err(ParseError::new(ErrorCode::NotErlangBinary))
     }
-    /*
-    if read_u8(f)? == 131 {
-        parse_any(f, mstr, &mut res_str)?;
-        Ok(res_str)
-    } else {
-        Err(ParseError::new(ErrorCode::NotErlangBinary))
-    }
-    */
 }
 
