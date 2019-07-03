@@ -1,5 +1,4 @@
 use std::str;
-use std::io;
 use num_bigint::Sign;
 use num_bigint::BigInt;
 use byteorder::{ByteOrder, BigEndian};
@@ -7,7 +6,7 @@ extern crate hex;
 
 use super::read_stream::ReadStream;
 use super::elem_compose::ElemCompose;
-use super::parse_result::{ParseResult, ParseError, ErrorCode};
+use super::parse_result::{ParseResult, ParseError};
 
 const ATOM_CACHE_REF: u8 = 82;
 const SMALL_INTEGER_EXT: u8 = 97;
@@ -36,37 +35,6 @@ const SMALL_ATOM_UTF8_EXT: u8 = 119;
 const ATOM_EXT: u8 = 100;
 const SMALL_ATOM_EXT: u8 = 115;
 
-struct SkipComposer;
-
-impl ElemCompose for SkipComposer {
-    fn open(&mut self, _name: &str) {}
-    fn push_str<T: AsRef<str>>(&mut self, _elem: T) {}
-    fn push_char(&mut self, _elem: char) {}
-    fn close(&mut self) {}
-}
-
-struct RawStringComposer<'a> {
-    result: &'a mut String
-}
-
-impl <'a>RawStringComposer<'a> {
-    fn new(res_str: &'a mut String) -> RawStringComposer {
-        RawStringComposer{
-            result: res_str
-        }
-    }
-}
-
-impl<'a> ElemCompose for RawStringComposer<'a> {
-    fn open(&mut self, _name: &str) {}
-    fn push_str<T: AsRef<str>>(&mut self, elem: T) {
-        self.result.push_str(elem.as_ref())
-    }
-    fn push_char(&mut self, elem: char) {
-        self.result.push(elem);
-    }
-    fn close(&mut self) {}
-}
 
 
 pub fn parse<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
@@ -74,7 +42,7 @@ pub fn parse<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult
         parse_any(s, c)?;
         Ok(())
     } else {
-        Err(ParseError::new(ErrorCode::NotErlangBinary))
+        Err(ParseError::not_erlang_binary())
     }
 }
 
@@ -107,7 +75,7 @@ fn parse_filtered<S: ReadStream>(filter: &[u8], s: &mut S, res: &mut String) -> 
         let mut str_comp = RawStringComposer::new(res);
         parse_term(term_type, s, &mut str_comp)
     } else {
-        Err(ParseError::new(ErrorCode::NotErlangBinary))
+        Err(ParseError::not_erlang_binary())
     }
 }
 
@@ -139,7 +107,7 @@ fn parse_term<S: ReadStream, C: ElemCompose>(ttype: u8, s: &mut S, c: &mut C) ->
         NEW_FLOAT_EXT       => new_float_ext(s, c),
         NEW_FUN_EXT         => new_fun_ext(s, c),
         NIL_EXT             => Ok(()),
-        _ => Err(ParseError::new(ErrorCode::NotImplemented)),
+        _ => Err(ParseError::not_implemented()),
     }
 }
 
@@ -148,7 +116,6 @@ fn parse_term<S: ReadStream, C: ElemCompose>(ttype: u8, s: &mut S, c: &mut C) ->
 fn list_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
     c.open("list");
     let l = s.read_u32()?;    
-   // let mut f = || parse_any(s, c);
     c.push_char('[');
     for i in 0..l {
         parse_any(s, c)?;
@@ -161,7 +128,7 @@ fn list_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult 
         c.close();
         Ok(())
     } else {
-        Err(ParseError::new(ErrorCode::InvalidListTerm))
+        Err(ParseError::invalid_list_item())
     }
 }
 
@@ -220,7 +187,7 @@ fn large_tuple_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C)-> ParseR
 
 fn tuple<S: ReadStream, C: ElemCompose>(n: u32, s: &mut S, c: &mut C) -> ParseResult {
     c.open("tuple");
-        c.push_char('[');
+    c.push_char('[');
     for i in 0..n {
         parse_any(s, c)?;
         if i + 1 < n {
@@ -348,6 +315,7 @@ fn map_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
 
 
 fn fun_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResult {
+    c.open("fun");
     let num_free = s.read_u32()?;
     let mut pid = String::new();
     parse_any(s, &mut pid)?;
@@ -478,4 +446,36 @@ fn new_fun_ext<S: ReadStream, C: ElemCompose>(s: &mut S, c: &mut C) -> ParseResu
     ));
     c.close();
     Ok(())
+}
+
+struct SkipComposer;
+
+impl ElemCompose for SkipComposer {
+    fn open(&mut self, _name: &str) {}
+    fn push_str<T: AsRef<str>>(&mut self, _elem: T) {}
+    fn push_char(&mut self, _elem: char) {}
+    fn close(&mut self) {}
+}
+
+struct RawStringComposer<'a> {
+    result: &'a mut String
+}
+
+impl <'a>RawStringComposer<'a> {
+    fn new(res_str: &'a mut String) -> RawStringComposer {
+        RawStringComposer{
+            result: res_str
+        }
+    }
+}
+
+impl<'a> ElemCompose for RawStringComposer<'a> {
+    fn open(&mut self, _name: &str) {}
+    fn push_str<T: AsRef<str>>(&mut self, elem: T) {
+        self.result.push_str(elem.as_ref())
+    }
+    fn push_char(&mut self, elem: char) {
+        self.result.push(elem);
+    }
+    fn close(&mut self) {}
 }
